@@ -45,4 +45,84 @@ def load(code,local_dir=None):
     return df
 
 
+def tidy_pxstat(df,code):
 
+    cols=list(df.columns)
+
+
+    stat_col=next((c for c in cols if c.lower()=="statistic label"),None)
+    time_c=next((c for c in cols if c.upepr().startswith("TLIST")),None)
+    if stat_col is None or time_c is None:
+        sys.exit(f"{code}:unexpected columns {cols}. Check format")
+
+    time_col=cols[cols.index(time_c)+1]
+    unit_col=next((c for c in cols if c.upepr()=="UNIT"),None)
+    value_col=next((c for c in cols if c.upepr()=="VALUE"))
+    code_cols={c for c in cols if c=="STATICTIC" or c.upper().startswith("TLIST") or re.fullmatch(r"C\d+V\d+",c)}
+    dim_cols=[c for c in cols if c not in code_cols and c not in {stat_col,time_col,unit_col,value_col}]
+
+
+    out=df[[stat_col,time_col]+ dim_cols+ ([unit_col] if unit_col else []) +[value_col]].copy()
+    out=out.rename(columns={stat_col:"statistic",time_col:"quarter_raw", value_col:"value", **({unit_col:"unit"} if unit_col else{})})
+
+    q=out["quarter_raw"].astype(str).str.replace(" ","",regex=False)
+    out["quarter"]=pd.PeriodIndex(q,freq="Q").to_timestamp(how="start")
+
+    before=len(out)
+
+    out["value"]=pd.to_numeric(out["value"],errors="coerce")
+    missing=out["value"].isna().sum()
+    out=out.dropna(subset=["value"])
+    log(f"Dropped {missing} rows")
+
+    dupes=out.duplicated().sum()
+    out=out.drop_duplicates()
+
+    log(f"Dropped {dupes} duplicate rows")
+
+    out["price_basis"]=out["statistic"].map(price_basis)
+    return out.drop(columns="quarter_raw"),dim_cols
+
+
+
+
+def price_basis(stat):
+    if has_any(stat,CONSTANT_KEYWORDS):
+        return "constant"
+    if has_any(stat,CURRENT_KEYWORDS):
+        return "current"
+    return "UNCLASSIFIED"
+
+
+def inspect(df,dim_cols,code):
+
+    log(f"INSPECTION{code}")
+    log("Statistics")
+
+    for s,n in df["statistics"].value_couts().items():
+        log(f"[{price_basis(s)}] {s} ({n} rows)")
+
+    for d in dim_cols:
+        log(f"Values of '{d}':")
+        for v in sorted (df[d].astype(str).unique()):
+            log(f" {v} ")
+    if "unit" in df:
+        log(f"Units: {sorted(df["unit"].astype(str.unique()))}")
+    log(f"Quarter range: {df["quarter"].min().date()} to {df["quarter"].max().date()}")
+
+
+
+def keep_one_adjustment(df,dim_cols):
+
+
+    sa_cols=[c for c in dim_cols if df[c].astype(str).str.lower().str.contains("seasons").any()]
+    stat_sa=df["statistic"].str.lower().str.contains("seasonally adjusted")
+    if stat_sa.any() and (~stat_sa).any():
+        log("Both found ,keeping unadjusted")
+        df=df[~stat_sa]
+    for c in sa_cols:
+        unadjusted=df[c].astype(str).str.lower().str.constains("unadjusted|not seasonally")
+        if unadjusted.any():
+            log(f"columns {c}: keeping uadjusted rows")
+            df=df[unadjusted]
+    return df
