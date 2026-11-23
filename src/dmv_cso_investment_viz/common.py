@@ -3,104 +3,114 @@ import re
 import sys
 from pathlib import Path
 import pandas as pd
-#CSO PxStat API, {code} is replaced with table code
+#the link for downloading the data using the REST API provided by CSO
 API= "https://ws.cso.ie/public/api.restful/PxStat.Data.Cube_API.ReadDataset/{code}/CSV/1.0/en"
 
 
-# KEYWORD RULES
-#lowercase substrings to classify rows
+
+#lowercase substrings to classify rows into groups
+#keywords for intangible label
 INTANGIBLE_KEYWORDS=["intellectual property","research and development","r&d","software","databases","computer software"]
+#keywords for tangible label
+
 TANGIBLE_KEYWORDS=["dwelling", "building","construction","transport equipment","machinery","equipment","cultivated","aircraft"]
 
-#Totals and subtotals: excluded from shares to avoid double counting
+#Totals and subtotals left out so its not counted twice
 
 AGGREGATE_KEYWORDS=["total","all asset","of which","gross fixed capital formation","(n11mg)"]
-
-#Price basis; current proices vs chain-linked volumes
+#keywords for current and constant
 CURRENT_KEYWORDS=["current"]
 CONSTANT_KEYWORDS=["constant","chain","volume"]
 #all logs in one array
 log_lines=[] 
 
+#logging messages
 def log(msg=""):
-    """ Print a message and keep in log"""
     print(msg)
     log_lines.append(str(msg))
 
-
+#this is a helper function for check if a text constains any keywords
 def has_any(text,keywords):
-    """ True if any keyword appears in text"""
     t=str(text).lower()
     return any(k in t for k in keywords)
 
-
-def load(code,local_dir=None):
-    """ Load the CSO table from saved csv , if not available in saved csv download amd keep a raw copy"""
-    if local_dir:
-        path=Path(local_dir)/f"{code}.csv"
-        log(f"loading {code} from {path}")
-        df=pd.read_csv(path,encoding="utf-8-sig")
-    else:
-        url=API.format(code=code)
-        log(f"Downlaoding {code} from {url}")
-        df=pd.read_csv(url,encoding="utf-8-sig")
-        Path("raw").mkdir(exist_ok=True)
-        df.to_csv(Path("raw")/f"{code}.csv",index=False)
-    df.columns=[ c.strip() for c in df.columns]
-    log(f"Raw shape {df.shape}")
-    return df
-
-
-def tidy_pxstat(df,code):
-    """ Turns a PxStat CSV into tidy columns"""
-    cols=list(df.columns)
-    #PxStat pairs each code column with a label colum
-    stat_col=next((c for c in cols if c.lower()=="statistic label"),None)
-    time_c=next((c for c in cols if c.upper().startswith("TLIST")),None)
-    if stat_col is None or time_c is None:
-        sys.exit(f"{code}:unexpected columns {cols}. Check format")
-
-    time_col=cols[cols.index(time_c)+1]
-    unit_col=next((c for c in cols if c.upper()=="UNIT"),None)
-    value_col=next((c for c in cols if c.upper()=="VALUE"))
-    # Code columns are dropped and labels are kept
-    code_cols={c for c in cols if c=="STATISCTIC" or c.upper().startswith("TLIST") or re.fullmatch(r"C\d+V\d+",c)}
-    dim_cols=[c for c in cols if c not in code_cols and c not in {stat_col,time_col,unit_col,value_col}]
-
-
-    out=df[[stat_col,time_col]+ dim_cols+ ([unit_col] if unit_col else []) +[value_col]].copy()
-    out=out.rename(columns={stat_col:"statistic",time_col:"quarter_raw", value_col:"value", **({unit_col:"unit"} if unit_col else{})})
-
-    #Parse 1995Q1 into a adte 
-    q=out["quarter_raw"].astype(str).str.replace(" ","",regex=False)
-    out["quarter"]=pd.PeriodIndex(q,freq="Q").to_timestamp(how="start")
-    #Missing values become NaN and are dropped
-    before=len(out)
-    out["value"]=pd.to_numeric(out["value"],errors="coerce")
-    missing=out["value"].isna().sum()
-    out=out.dropna(subset=["value"])
-    log(f"Dropped {missing} rows")
-
-    dupes=out.duplicated().sum()
-    out=out.drop_duplicates()
-
-    log(f"Dropped {dupes} duplicate rows")
-
-    out["price_basis"]=out["statistic"].map(price_basis)
-    return out.drop(columns="quarter_raw"),dim_cols
-
-
-
-
+#this function is used to label according to constant and current keywords
 def price_basis(stat):
-    """ Classify a statistic as current prices or constant"""
     if has_any(stat,CONSTANT_KEYWORDS):
         return "constant"
     if has_any(stat,CURRENT_KEYWORDS):
         return "current"
     return "UNCLASSIFIED"
 
+#load the table from a saved csv. If not given , downlaod via teh CSO API
+def load(code,local_dir=None):
+   #checks if local directory is True
+    if local_dir:
+        path=Path(local_dir)/f"{code}.csv"
+        log(f"loading {code} from {path}")
+        df=pd.read_csv(path,encoding="utf-8-sig")
+    #else will use the API to get teh data
+    else:
+        log(f"Downlaoding {code} from {url}")
+        url=API.format(code=code)
+        
+        #read data into pandas csv 
+        df=pd.read_csv(url,encoding="utf-8-sig")
+        #make the directiory if not present for storing raw data
+        Path("raw").mkdir(exist_ok=True)
+        df.to_csv(Path("raw")/f"{code}.csv",index=False)
+    #get columns of the df and remove whitespaces
+    df.columns=df.columns.str.strip()
+    log(f"Raw shape {df.shape}")
+    #return the dataframe
+    return df
 
+#getting the label of the code
+def is_code_col(name):
+    return bool(re.fullmatch(f"STATISTIC|TLIST.*|C\d+V\d+",name,re.IGNORECASE))
+
+#cleaning the raw data
+def clean_raw_data(df,code):
+   
+    cols=list(df.columns)
+    #turning into lowercase
+    lower=[c.lower() for c in cols]
+    #enclosing in try and except blocks
+    try:
+        stat_col=cols[lower.index("statistic label")]
+        value_col=cols[lower.index("value")]
+        tlist_col=next(c for c in cols if c.upper().startwith("TLIST"))
+    except(ValueError,StopIteration):
+        sys.exit(f"{code}:unexpected columns {cols}. Check format")
+
+    quarter_col=cols[cols.index(tlist_col)+1] #teh labels are right after the code
+    unit_col=cols[lower.index("unit")] if "unit" in lower else None
+    
+    # Anything left that is noy a code col is a dimension
+    used={stat_col,value_col,quarter_col,unit_col}
+    #getting dimension columns
+    dim_cols=[c for c in cols if c not in used and not is_code_col(c)]
+
+    #renaming cols
+    df=df.rename(columns={stat_col:"statistic",quarter_col:"quarter", value_col:"value", unit_col:"unit"})
+
+    keep=["statistic","quarter"]+dim_cols+(["unit"] if unit_col else [])+ ["value"]
+#filter df bey keep and make a copy
+    df=df[keep].copy()
+
+    df["quarter"]=pd.PeriodIndex(df["quarter"].astype(str).str.replace(" ",""), freq="Q").to_timestamp()
+
+    #dropping nan
+    df["value"]=pd.to_numeric(df["numeric"],erros="corece")
+    length_of_df=len(df)
+    df=df.dropna(subset=["value"]).drop_duplicates() #drop duplicates
+    log("Missing values and duplicated dropped")
+#map the columns using the function
+    df["prices_basis"]=df["statistic"].map(price_basis)
+
+    return df,dim_cols
+
+#inspecting the clean data
 def inspect(df,dim_cols,code):
     """ Log what the table contains, so the keyword rules can be checked"""
 

@@ -1,44 +1,58 @@
 from common import *
 
-def clean_naq10(local_dir=None):
-    #Load,tidy,inspect and keep unadjusted series only
-    raw=load("NAQ10",local_dir)
-    df,dims=tidy_pxstat(raw,"NAQ10")
-    inspect(df,dims,"NAQ10")
-    df=keep_one_adjustment(df,dims)
+#forming one variavle for tangible and intnagible keywords
+ALL_ASSET_WORDS= INTANGIBLE_KEYWORDS+ TANGIBLE_KEYWORDS
+#defining the final columns to be used in output
+FINAL_OUTPUT_COLUMNS=["quarter","price_basis","statistic","asset","asset_group","is_aggregate","value"]
 
+#function to cehck which of teh columns have the asset types
+def guess_asset_dim(data,dimension_cols):
+    best_column,best_hits=None,-1
+    for col in dimension_cols:
+        #calculate the hits
+        hits=sum(has_any(str(v),ALL_ASSET_WORDS) for v in data[col])
+        if hits> best_hits:
+            best_column,best_hits=col,hits
+    #return the best column
+    return best_column
 
-#Asset column
-    assest_col=max(dims,key=lambda c: df[c].astype(str).map(lambda v: has_any(v,INTANGIBLE_KEYWORDS+TANGIBLE_KEYWORDS)).sum())
-    df=df.rename(columns={assest_col:"asset"})
-    log(f"\n NAQ10 asset column detected")
-    #Flag totals/subtotals so they are not counted twice
-    df["is_aggregate"]=df["asset"].map(lambda a :has_any(a,AGGREGATE_KEYWORDS))
-
-
-    def group(a):
-        if has_any(a,INTANGIBLE_KEYWORDS):
+# cehcks for the three main keywords and returns the respective laels
+def label_asset(asset_name):
+    if has_any(asset_name,AGGREGATE_KEYWORDS):
+        return "Aggregate"
+    if has_any(asset_name,INTANGIBLE_KEYWORDS):
             return "Intangible"
-        if has_any(a,TANGIBLE_KEYWORDS):
+    if has_any(asset_name,TANGIBLE_KEYWORDS):
             return "Tangible"
-        return "UNCLASSIFIED"
+    return "UNCLASSIFIED"
 
-    df["asset_group"]=df["asset"].map(group)
-    df.loc[df["is_aggregate"],"asset_group"]="Aggregate"
-    log(f"\n NAQ10 asset classification")
+#checks which group eacha sset was put in
+def show_mapping(data):
+    pairs=data[["asset","asset_group"]].drop_duplicates().sort_values(["asset","asset_group"])
+    log("NAQ10 asset mapping")
+    for asset, grp in pairs.itertuples(index=False):
+         log(f"{grp}: {asset}")
+    missed=pairs.loc[pairs["asset_group"]=="UNCLASSIFIED","asset"].tolist()
+    if missed:
+         log(f" No amtch for the {missed}")
+#load and clean naq10 table    
+def prepare_naq10(local_dir=None):
+     #load the table from a saved csv. If not given , downlaod via teh CSO API
+     raw_data=load("NAQ10",local_dir)
+     #clean and give the list of dimenion columns
+     data,dimemsion_cols=clean_raw_data(raw_data,"NAQ10")
+     inspect_clean_data(data,dimemsion_cols,"NAQ10")
+     data=keep_one_adjustment(data,dimemsion_cols)
+     #cehck which column has asset name and call it asset
 
+     asset_dimensions=guess_asset_dim(data,dimemsion_cols)
+     log(f" NAQ10 using {asset_dimensions} as the asset colums")
+     #tag each row and log the mapping
+     data=data.rename(columns={asset_dimensions:"asset"})
+     data["asset_group"]=data["asset"].apply(label_asset)
+     show_mapping(data)
 
-    for (a,g),_ in df.groupby(["asset","asset_group"]):
-        log(f"{g:13s} : {a}")
-    #Warn about assets no keyword matched
-
-    unclassified=df.loc[df["asset_group"]=="UNCLASSIFIED","asset"].unique()
-    if len(unclassified):
-        log(f" Unclasified assets {list(unclassified)}")
-    #Keep ony the columns the merge and chart need
-
-    keep=["quarter","price_basis","statistic","asset","asset_group","is_aggregate","value"]
-    keep+= [c for c in ["unit"] if c in df]
-    return df[keep].sort_values(["price_basis","asset","quarter"])
-
+#keep only final columns which were listed above
+     cols=FINAL_OUTPUT_COLUMNS+(["unit"] if "unit" in data.columns else [])
+     return data[cols].sort_values(['price_basis',"asset","quarter"])
 
