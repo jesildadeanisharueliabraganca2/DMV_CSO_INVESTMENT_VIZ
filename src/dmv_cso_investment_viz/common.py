@@ -112,7 +112,6 @@ def clean_raw_data(df,code):
 
 #inspecting the clean data
 def inspect(df,dim_cols,code):
-    """ Log what the table contains, so the keyword rules can be checked"""
 
     log(f"INSPECTION{code}")
     log("Statistics")
@@ -120,26 +119,19 @@ def inspect(df,dim_cols,code):
     for s,n in df["statistic"].value_counts().items():
         log(f"[{price_basis(s)}] {s} ({n} rows)")
 
-    for d in dim_cols:
-        log(f"Values of '{d}':")
-        for v in sorted (df[d].astype(str).unique()):
-            log(f" {v} ")
-    if "unit" in df:
-        log(f"Units: {sorted(df['unit'].astype(str).unique())}")
+    for col in dim_cols:
+        log(f" {col}:{sorted(df[col].astype(str).unique())}")
     log(f"Quarter range: {df["quarter"].min().date()} to {df["quarter"].max().date()}")
 
 
-
+#dropping seasonally adjusted rows if mixed
 def keep_one_adjustment(df,dim_cols):
-    """ Keep unadjusted series only, so seasonal adjustment isn't mixed in"""
-    sa_cols=[c for c in dim_cols if df[c].astype(str).str.lower().str.contains("season").any()]
-    stat_sa=df["statistic"].str.lower().str.contains("seasonally adjusted")
-    if stat_sa.any() and (~stat_sa).any():
-        log("Both found ,keeping unadjusted")
-        df=df[~stat_sa]
-    for c in sa_cols:
-        unadjusted=df[c].astype(str).str.lower().str.constains("unadjusted|not seasonally")
-        if unadjusted.any():
+    for col in ["statistic"]+dim_cols:
+        text=df[col].astype(str).str.lower()
+        adjusted=text.str.contains("seasonally adjusted") & ~text.str.contains("unadjusted|not seasonally")
+
+        if adjusted.any() and not adjusted.all():
             log(f"columns {c}: keeping uadjusted rows")
-            df=df[unadjusted]
+            df=df[~adjusted]
+
     return df
