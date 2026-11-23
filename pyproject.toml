@@ -1,0 +1,20 @@
+[project]
+name = "dmv-cso-investment-viz"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Jesilda Braganca", email = "jesildabraganca@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "pandas>=3.1.1",
+    "plotly>=7.1.0",
+]
+
+[project.scripts]
+dmv-cso-investment-viz = "dmv_cso_investment_viz:main"
+
+[build-system]
+requires = ["uv_build>=0.12.14,<0.13.0"]
+build-backend = "uv_build"
