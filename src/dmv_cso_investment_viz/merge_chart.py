@@ -5,7 +5,8 @@ def reshape_naq10(naq10):
     reshaped = naq10.pivot_table(
         index=["quarter", "price_basis"], 
         columns="asset_group", 
-        values="value"
+        values="value",
+        aggfunc="sum"
         ).reset_index()
     reshaped.columns.name = None  # remove the name of the columns index
 
