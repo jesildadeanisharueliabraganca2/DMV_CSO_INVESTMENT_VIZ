@@ -50,6 +50,9 @@ def prepare_naq10(local_dir=None):
      #tag each row and log the mapping
      data=data.rename(columns={asset_dimensions:"asset"})
      data["asset_group"]=data["asset"].apply(label_asset)
+     data["is_aggregate"] = data["asset_group"] == "Aggregate"
+     if "price_basis" not in data.columns:
+          data["price_basis"] = data["statistic"].map(price_basis)
      show_mapping(data)
 
 #keep only final columns which were listed above

@@ -51,9 +51,9 @@ def load(code,local_dir=None):
         df=pd.read_csv(path,encoding="utf-8-sig")
     #else will use the API to get teh data
     else:
-        log(f"Downlaoding {code} from {url}")
         url=API.format(code=code)
-        
+        log(f"Downlaoding {code} from {url}")
+
         #read data into pandas csv 
         df=pd.read_csv(url,encoding="utf-8-sig")
         #make the directiory if not present for storing raw data
@@ -79,7 +79,7 @@ def clean_raw_data(df,code):
     try:
         stat_col=cols[lower.index("statistic label")]
         value_col=cols[lower.index("value")]
-        tlist_col=next(c for c in cols if c.upper().startwith("TLIST"))
+        tlist_col=next(c for c in cols if c.upper().startswith("TLIST"))
     except(ValueError,StopIteration):
         sys.exit(f"{code}:unexpected columns {cols}. Check format")
 
@@ -101,7 +101,7 @@ def clean_raw_data(df,code):
     df["quarter"]=pd.PeriodIndex(df["quarter"].astype(str).str.replace(" ",""), freq="Q").to_timestamp()
 
     #dropping nan
-    df["value"]=pd.to_numeric(df["numeric"],erros="corece")
+    df["value"]=pd.to_numeric(df["value"],errors="coerce")
     length_of_df=len(df)
     df=df.dropna(subset=["value"]).drop_duplicates() #drop duplicates
     log("Missing values and duplicated dropped")
@@ -111,7 +111,7 @@ def clean_raw_data(df,code):
     return df,dim_cols
 
 #inspecting the clean data
-def inspect(df,dim_cols,code):
+def inspect_clean_data(df,dim_cols,code):
 
     log(f"INSPECTION{code}")
     log("Statistics")
@@ -131,7 +131,7 @@ def keep_one_adjustment(df,dim_cols):
         adjusted=text.str.contains("seasonally adjusted") & ~text.str.contains("unadjusted|not seasonally")
 
         if adjusted.any() and not adjusted.all():
-            log(f"columns {c}: keeping uadjusted rows")
+            log(f"columns {col}: keeping unadjusted rows")
             df=df[~adjusted]
 
     return df
